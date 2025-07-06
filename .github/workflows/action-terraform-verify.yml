@@ -1,0 +1,225 @@
+name: Terraform Validation and Security Checks
+on:
+  pull_request:
+    branches:
+      - main
+      - master
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  # Job 1: Terraform Formatting Check
+  terraform-fmt:
+    runs-on: ubuntu-latest
+    name: Terraform Format Check
+    outputs:
+      CHECK_STATUS: "${{ env.CHECK_STATUS }}"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Fetch changed files
+        id: pr_files
+        uses: jitterbit/get-changed-files@v1
+        with:
+          format: "space-delimited"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+
+      - name: Validate terraform fmt (added_modified)
+        run: |
+          set +e
+          echo "CHECK_STATUS=0" >> $GITHUB_ENV
+          
+          # Initialize summary
+          echo "## 📝 Terraform Format Check Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          for changed_file in ${{ steps.pr_files.outputs.added_modified }}; do
+            echo "Checking terraform fmt on ${changed_file}..."
+            
+            if [[ $changed_file == *.tf ]]; then
+              terraform fmt -check $changed_file
+              FMT_STATUS=$?
+              
+              if [[ $FMT_STATUS -ne 0 ]]; then
+                echo "❌ terraform fmt failed - ${changed_file}" >> $GITHUB_STEP_SUMMARY
+                echo "CHECK_STATUS=1" >> $GITHUB_ENV
+              else
+                echo "✅ terraform fmt passed - ${changed_file}" >> $GITHUB_STEP_SUMMARY
+              fi
+            fi
+          done
+          
+          if [[ $CHECK_STATUS -eq 0 ]]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "🎉 All Terraform files are properly formatted!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "💡 **Fix formatting by running:** \`terraform fmt -recursive\`" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Process format check results
+        if: always()
+        run: exit $CHECK_STATUS
+
+  # Job 2: Terraform Validation and Security
+  terraform-validate:
+    runs-on: ubuntu-latest
+    name: Terraform Validation & Security
+    needs: terraform-fmt
+    if: always()
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+
+      - name: Terraform Init
+        run: |
+          cd infrastructure
+          terraform init -backend=false
+
+      - name: Terraform Validate
+        id: validate
+        run: |
+          cd infrastructure
+          terraform validate -no-color
+        continue-on-error: true
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.48.0
+
+      - name: Show TFLint version
+        run: tflint --version
+
+      - name: Init TFLint
+        run: |
+          cd infrastructure
+          tflint --init
+
+      - name: Run TFLint
+        id: tflint
+        run: |
+          cd infrastructure
+          tflint -f compact
+        continue-on-error: true
+
+      - name: Setup Checkov
+        run: |
+          pip install checkov
+
+      - name: Run Checkov security scan
+        id: checkov
+        run: |
+          cd infrastructure
+          checkov -d . --framework terraform --output cli --output json --output-file-path console,checkov-report.json
+        continue-on-error: true
+
+      - name: Upload Checkov results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: checkov-report
+          path: infrastructure/checkov-report.json
+
+      - name: Create validation summary
+        if: always()
+        run: |
+          echo "## 🔍 Terraform Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Terraform Validate Results
+          echo "### Terraform Validate" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ steps.validate.outcome }}" == "success" ]]; then
+            echo "✅ **Terraform validation passed**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Terraform validation failed**" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # TFLint Results
+          echo "### TFLint Analysis" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ steps.tflint.outcome }}" == "success" ]]; then
+            echo "✅ **TFLint analysis passed**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **TFLint found issues**" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Checkov Results
+          echo "### Security Scan (Checkov)" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ steps.checkov.outcome }}" == "success" ]]; then
+            echo "✅ **Security scan passed**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ **Security scan found potential issues**" >> $GITHUB_STEP_SUMMARY
+            echo "📄 Check the uploaded Checkov report for details" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Final validation check
+        if: steps.validate.outcome == 'failure'
+        run: |
+          echo "Terraform validation failed!"
+          exit 1
+
+  # Job 3: Terraform Plan (for reference)
+  terraform-plan:
+    runs-on: ubuntu-latest
+    name: Terraform Plan
+    needs: [terraform-fmt, terraform-validate]
+    if: github.event_name == 'pull_request' && needs.terraform-validate.result == 'success'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+
+      - name: Terraform Init
+        run: |
+          cd infrastructure
+          terraform init -backend=false
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          cd infrastructure
+          terraform plan -no-color -out=tfplan
+        continue-on-error: true
+
+      - name: Create plan summary
+        if: always()
+        run: |
+          echo "## 📋 Terraform Plan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ steps.plan.outcome }}" == "success" ]]; then
+            echo "✅ **Terraform plan generated successfully**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The plan shows what resources would be created/modified if this configuration were applied." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "> **Note:** This is a dry-run only. No resources will be created." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Terraform plan failed**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Please check the configuration for errors." >> $GITHUB_STEP_SUMMARY
+          fi

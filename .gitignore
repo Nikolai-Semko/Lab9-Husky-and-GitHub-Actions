@@ -1,0 +1,58 @@
+# Terraform files
+*.tfstate
+*.tfstate.*
+*.tfplan
+# *.tfvars  # Commented out for lab purposes - normally you'd ignore this
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate.backup
+crash.log
+crash.*.log
+
+# Terraform binaries (should not be in repository)
+terraform
+terraform.exe
+*.exe
+
+# Node.js files
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+logs
+*.log
+
+# Security scan results
+checkov-report.json
+tflint-report.json
+
+# Temporary files
+*.tmp
+*.temp
