@@ -12,7 +12,7 @@ resource "azurerm_resource_group" "main" {
     Environment = var.environment
     Project     = var.project_name
     CreatedBy   = "Terraform"
-  }
+  }  
 }
 
 # Create a random string for unique naming
