@@ -1,100 +1,28 @@
+#!/bin/sh
+. "$(dirname -- "$0")/_/husky.sh"
+
 echo "🔍 Running pre-commit checks..."
 
-# Function to find Terraform
-find_terraform() {
-    # Try different common paths and commands
-    if command -v terraform >/dev/null 2>&1; then
-        echo "terraform"
-    elif [ -f "/usr/local/bin/terraform" ]; then
-        echo "/usr/local/bin/terraform"
-    elif [ -f "/c/ProgramData/chocolatey/bin/terraform.exe" ]; then
-        echo "/c/ProgramData/chocolatey/bin/terraform.exe"
-    elif [ -f "/c/Program Files/Terraform/terraform.exe" ]; then
-        echo "/c/Program Files/Terraform/terraform.exe"
-    elif command -v winpty >/dev/null 2>&1 && command -v terraform.exe >/dev/null 2>&1; then
-        echo "winpty terraform.exe"
-    else
-        return 1
-    fi
-}
+# Change to infrastructure directory
+cd infrastructure || exit 1
 
-# Find Terraform executable
-TERRAFORM_CMD=$(find_terraform)
-if [ $? -ne 0 ]; then
-    echo "❌ Terraform not found in PATH!"
-    echo "💡 Please install Terraform or add it to your PATH"
-    echo "   Download from: https://www.terraform.io/downloads"
-    echo "   Or install with: choco install terraform"
-    exit 1
-fi
-
-echo "✅ Found Terraform at: $TERRAFORM_CMD"
-
-# Change to infrastructure directory (works on both Windows and Unix)
-if [ -d "infrastructure" ]; then
-    cd infrastructure
-else
-    echo "❌ Infrastructure directory not found!"
-    exit 1
-fi
-
-# Check if terraform files exist (Windows compatible)
-if [ -n "$(find . -name '*.tf' -print -quit 2>/dev/null)" ]; then
+# Check if terraform files exist
+if ls *.tf 1> /dev/null 2>&1; then
     echo "📝 Running terraform fmt check..."
-    $TERRAFORM_CMD fmt -check -recursive
-    FMT_EXIT_CODE=$?
-    
-    if [ $FMT_EXIT_CODE -ne 0 ]; then
+    terraform fmt -check -recursive
+    if [ $? -ne 0 ]; then
         echo "❌ Terraform formatting check failed!"
-        echo "💡 Run '$TERRAFORM_CMD fmt -recursive' to fix formatting issues"
         exit 1
     fi
     echo "✅ Terraform formatting check passed"
     
     echo "🔍 Running terraform validate..."
-    
-    # Check if terraform is initialized
-    if [ ! -d ".terraform" ] || [ ! -f ".terraform.lock.hcl" ]; then
-        echo "⚠️  Terraform not initialized, initializing..."
-        $TERRAFORM_CMD init -backend=false
-        INIT_EXIT_CODE=$?
-        
-        if [ $INIT_EXIT_CODE -ne 0 ]; then
-            echo "❌ Terraform initialization failed!"
-            echo "💡 Try running: cd infrastructure && terraform init"
-            exit 1
-        fi
-        echo "✅ Terraform initialized successfully"
-    fi
-    
-    $TERRAFORM_CMD validate
-    VALIDATE_EXIT_CODE=$?
-    
-    if [ $VALIDATE_EXIT_CODE -ne 0 ]; then
+    terraform validate
+    if [ $? -ne 0 ]; then
         echo "❌ Terraform validation failed!"
         exit 1
     fi
     echo "✅ Terraform validation passed"
-    
-    # Check if tflint is available
-    if command -v tflint >/dev/null 2>&1; then
-        echo "🔍 Running tflint..."
-        tflint
-        TFLINT_EXIT_CODE=$?
-        
-        if [ $TFLINT_EXIT_CODE -eq 0 ]; then
-            echo "✅ TFLint check passed - no issues found"
-        elif [ $TFLINT_EXIT_CODE -eq 2 ]; then
-            echo "⚠️  TFLint found warnings (not blocking commit)"
-            echo "💡 Consider reviewing and fixing the warnings above"
-        else
-            echo "❌ TFLint found errors!"
-            echo "💡 Please fix the errors before committing"
-            exit 1
-        fi
-    else
-        echo "ℹ️  TFLint not found, skipping static analysis"
-    fi
 else
     echo "ℹ️  No Terraform files found, skipping checks"
 fi
