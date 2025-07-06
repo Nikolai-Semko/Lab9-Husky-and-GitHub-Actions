@@ -28,3 +28,4 @@ else
 fi
 
 echo "🎉 All pre-commit checks passed!"
+"tflint" 
