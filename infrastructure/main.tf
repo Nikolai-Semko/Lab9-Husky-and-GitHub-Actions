@@ -20,7 +20,7 @@ resource "random_string" "suffix" {
   length  = 6
   special = false
   upper   = false
-
+}
 
 # Create a storage account
 resource "azurerm_storage_account" "lab_storage" {
